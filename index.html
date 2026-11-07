@@ -71,6 +71,18 @@
 
   #toast{position:fixed;left:50%;bottom:30px;transform:translate(-50%,16px);background:#b7d63b;color:#141a15;padding:10px 20px;border-radius:999px;font-size:13px;font-weight:700;opacity:0;transition:.22s;pointer-events:none;z-index:20;box-shadow:0 10px 30px rgba(0,0,0,.4)}
   #toast.on{opacity:1;transform:translate(-50%,0)}
+
+  /* ---------- 分享 / 协作 ---------- */
+  #share{padding:8px 16px 10px;border-bottom:1px solid #232c1e}
+  #share summary{cursor:pointer;font-size:12px;color:#a9b59f;outline:none;letter-spacing:.3px;padding:2px 0}
+  #share summary b{color:#b7d63b;font-weight:400;margin-left:4px}
+  #share[open] summary{margin-bottom:8px}
+  #share .row2{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px}
+  #share .row2 button{font-family:inherit;cursor:pointer;border-radius:6px;font-size:12px;padding:8px 8px;background:#1b2317;color:#dfe6d6;border:1px solid #2b3625}
+  #share .row2 button:hover{border-color:#b7d63b}
+  #share .row2 button.primary{background:#b7d63b;color:#141a15;border-color:#b7d63b;font-weight:700}
+  #share .note{font-size:11px;color:#6d7a66;margin:2px 0 0;line-height:1.6}
+  #fileJson{display:none}
 </style>
 </head>
 <body>
@@ -377,6 +389,20 @@
       <label id="blurwrap">模糊<input type="range" id="blur" min="0" max="24" step="2" value="0"><span id="blurv">0</span></label>
       <input type="file" id="fileBg" accept="image/*">
     </section>
+
+    <details id="share" open>
+      <summary>分享 / 协作 <b id="sharestat">改完发给朋友</b></summary>
+      <div class="row2">
+        <button id="btnShare" class="primary">复制分享链接</button>
+        <button id="btnJsonOut">导出工程 JSON</button>
+      </div>
+      <div class="row2">
+        <button id="btnJsonIn">导入工程 JSON</button>
+        <button id="btnHashClear">回到原始版</button>
+      </div>
+      <p class="note">把链接发给朋友：他打开就是你的版本，可以接着改；改完再复制一次发回来。</p>
+      <input type="file" id="fileJson" accept=".json,application/json">
+    </details>
 
     <div id="fields"></div>
 
@@ -779,6 +805,110 @@
     }
   });
 
+  /* ---------- 分享 / 协作（链接带修改，不需要服务器） ---------- */
+  function b64e(s) {
+    return btoa(unescape(encodeURIComponent(s))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+  }
+  function b64d(s) {
+    s = String(s).replace(/-/g, "+").replace(/_/g, "/");
+    while (s.length % 4) s += "=";
+    return decodeURIComponent(escape(atob(s)));
+  }
+  function snapshot() {
+    var d = { v: 1, t: {} };
+    cards.forEach(function (c, i) {
+      textsOf(c).forEach(function (t, k) {
+        if (t.textContent !== ORIG[i][k]) { (d.t[i] = d.t[i] || {})[k] = t.textContent; }
+      });
+    });
+    d.b = { mode: bgState.mode, idx: bgState.idx, veil: bgState.veil, blur: bgState.blur };
+    return d;
+  }
+  function applySnapshot(d) {
+    if (!d || typeof d !== "object") return false;
+    var t = d.t || {};
+    Object.keys(t).forEach(function (i) {
+      var card = cards[+i];
+      if (!card) return;
+      textsOf(card).forEach(function (el, k) {
+        if (t[i][k] != null) el.textContent = String(t[i][k]);
+      });
+    });
+    if (d.b) {
+      var mode = d.b.mode === "photo" ? "orig" : (d.b.mode || "orig");
+      applyBg({ mode: mode, idx: d.b.idx || 0, photo: "", veil: d.b.veil || 0, blur: d.b.blur || 0 }, true);
+    }
+    persist();
+    return true;
+  }
+  function shareURL() {
+    return location.href.split("#")[0] + "#s=" + b64e(JSON.stringify(snapshot()));
+  }
+  function hashState() {
+    var m = /(?:^|[#&])s=([^&]+)/.exec(location.hash || "");
+    if (!m) return null;
+    try { return JSON.parse(b64d(m[1])); } catch (e) { return null; }
+  }
+  function copyText(txt) {
+    if (navigator.clipboard && navigator.clipboard.writeText) return navigator.clipboard.writeText(txt);
+    return new Promise(function (res, rej) {
+      try {
+        var ta = document.createElement("textarea");
+        ta.value = txt; ta.style.position = "fixed"; ta.style.opacity = "0";
+        document.body.appendChild(ta); ta.select(); document.execCommand("copy"); ta.remove(); res();
+      } catch (e) { rej(e); }
+    });
+  }
+  document.getElementById("btnShare").addEventListener("click", function () {
+    var u = shareURL();
+    copyText(u).then(function () {
+      toast("分享链接已复制（" + u.length + " 字符）");
+      document.getElementById("sharestat").textContent = "链接 " + u.length + " 字符，已复制";
+    }, function () { window.prompt("复制这个链接发给朋友：", u); });
+  });
+  document.getElementById("btnJsonOut").addEventListener("click", function () {
+    var blob = new Blob([JSON.stringify(snapshot(), null, 1)], { type: "application/json" });
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement("a");
+    a.href = url;
+    a.download = "岩场守护日_修改_" + new Date().toISOString().slice(0, 10) + ".json";
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(function () { URL.revokeObjectURL(url); }, 5000);
+    toast("已导出工程 JSON");
+  });
+  document.getElementById("btnJsonIn").addEventListener("click", function () {
+    document.getElementById("fileJson").click();
+  });
+  document.getElementById("fileJson").addEventListener("change", function (e) {
+    var f = e.target.files && e.target.files[0];
+    if (!f) return;
+    var fr = new FileReader();
+    fr.onload = function () {
+      try {
+        applySnapshot(JSON.parse(fr.result));
+        renderFields();
+        toast("已载入工程：" + f.name);
+      } catch (err) { toast("这个 JSON 读不了"); }
+    };
+    fr.onerror = function () { toast("读取文件失败"); };
+    fr.readAsText(f);
+    e.target.value = "";
+  });
+  document.getElementById("btnHashClear").addEventListener("click", function () {
+    if (location.hash) history.replaceState(null, "", location.href.split("#")[0]);
+    cards.forEach(function (c, i) {
+      textsOf(c).forEach(function (t, k) { t.textContent = ORIG[i][k]; });
+    });
+    try { localStorage.removeItem(KEY); } catch (e) {}
+    applyBg({ mode: "orig", idx: 0, photo: "", veil: 0, blur: 0 }, true);
+    renderFields(); show(0);
+    toast("已回到原始版");
+  });
+  window.__shareURL = shareURL;
+  window.__snapshot = snapshot;
+  window.__hashState = hashState;
+  window.__applySnapshot = applySnapshot;
+
   /* ---------- 初始化 ---------- */
   var st = saved();
   Object.keys(st).forEach(function (i) {
@@ -788,6 +918,11 @@
       if (st[i][k] != null) t.textContent = st[i][k];
     });
   });
+  var shared = hashState();
+  if (shared) {
+    applySnapshot(shared);
+    document.getElementById("sharestat").textContent = "来自分享链接";
+  }
   buildTabs();
   show(0);
   fit();
