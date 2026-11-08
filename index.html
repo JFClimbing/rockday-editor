@@ -83,6 +83,21 @@
   #share .row2 button.primary{background:#b7d63b;color:#141a15;border-color:#b7d63b;font-weight:700}
   #share .note{font-size:11px;color:#6d7a66;margin:2px 0 0;line-height:1.6}
   #fileJson{display:none}
+
+  /* ---------- 拖动 / 隐藏 / 字号 ---------- */
+  #posbar{display:flex;align-items:center;gap:8px;padding:2px 16px 8px;font-size:11px;color:#7d8a75}
+  #posbar b{color:#b7d63b;font-weight:400}
+  #posbar .sw{margin-left:auto;color:#b7d63b}
+  #posbar button{font-family:inherit;font-size:11px;padding:3px 8px;border-radius:5px;background:#1b2317;border:1px solid #2b3625;color:#a9b59f;cursor:pointer}
+  #posbar button:hover{border-color:#b7d63b;color:#dfe6d6}
+  #wrap text[data-i]{cursor:move}
+  #wrap text[data-i]:hover{opacity:.82}
+  .field .fh{display:flex;align-items:baseline;justify-content:space-between;gap:6px;margin-bottom:4px}
+  .field .fh label{margin:0}
+  .field .fh .fb{display:flex;gap:3px;flex-shrink:0}
+  .field .fh .fb button{font-family:inherit;font-size:10px;line-height:1;padding:2px 5px;border-radius:4px;background:#1b2317;border:1px solid #2b3625;color:#8e988e;cursor:pointer}
+  .field .fh .fb button:hover{border-color:#b7d63b;color:#dfe6d6}
+  .field.hid input,.field.hid textarea{opacity:.35}
 </style>
 </head>
 <body>
@@ -404,6 +419,12 @@
       <input type="file" id="fileJson" accept=".json,application/json">
     </details>
 
+    <div id="posbar">
+      <span>拖动左侧文字可移动 · 双击文字定位到右侧</span>
+      <span class="sw" id="poscount"></span>
+      <button id="btnUnhide" title="把这张卡里隐藏的文字全部显示出来">显示全部</button>
+    </div>
+
     <div id="fields"></div>
 
     <section id="tools">
@@ -421,7 +442,7 @@
         <button id="btnResetCard">还原当前卡片</button>
         <button id="btnResetAll">清除所有修改</button>
       </div>
-      <p class="note">提示：Ctrl/⌘+S 导出当前图；导出多张时浏览器可能询问「允许多个下载」。改字不会动版式，文字太长会溢出卡片，注意调短。若某浏览器导出失败，换 Firefox / Edge 打开即可。</p>
+      <p class="note">提示：文字可改、可拖动、可隐藏（拖左侧预览里的文字，隐藏＝导出时消失）；字号用每行右边的 A−/A＋ 微调。Ctrl/⌘+S 导出当前图，导出多张时浏览器可能询问「允许多个下载」。文字太长会溢出卡片，注意调短；若某浏览器导出失败，换 Firefox / Edge 打开即可。</p>
     </section>
   </aside>
 </div>
@@ -476,10 +497,53 @@
     var box = document.getElementById("fields");
     box.innerHTML = "";
     textsOf(card).forEach(function (t, idx) {
+      var st = pstate(cur, idx);
       var d = document.createElement("div");
-      d.className = "field";
+      d.className = "field" + (st.hidden ? " hid" : "");
+      var fh = document.createElement("div");
+      fh.className = "fh";
       var lab = document.createElement("label");
-      lab.innerHTML = labelOf(t, idx) + " <b>#" + (idx + 1) + "</b>";
+      lab.innerHTML = labelOf(t, idx) + " <b>#" + (idx + 1) + "</b>"
+        + (st.hidden ? ' <span style="color:#e4572e">已隐藏</span>' : "");
+      var fb = document.createElement("div");
+      fb.className = "fb";
+      var bHide = document.createElement("button");
+      bHide.textContent = st.hidden ? "显示" : "隐藏";
+      bHide.title = "隐藏/显示这段文字（删除效果）";
+      bHide.addEventListener("click", function () {
+        var s = pstate(cur, idx);
+        s.hidden = !s.hidden;
+        savePos(); applyPositions(cur); renderFields();
+        toast(s.hidden ? "已隐藏 #" + (idx + 1) : "已显示 #" + (idx + 1));
+      });
+      var bReset = document.createElement("button");
+      bReset.textContent = "复位";
+      bReset.title = "位置和字号回到初始";
+      bReset.addEventListener("click", function () {
+        var s = pstate(cur, idx);
+        delete s.dx; delete s.dy; delete s.s;
+        savePos(); applyPositions(cur); renderFields();
+        toast("已复位 #" + (idx + 1));
+      });
+      var bMinus = document.createElement("button");
+      bMinus.textContent = "A−";
+      bMinus.title = "字号缩小";
+      bMinus.addEventListener("click", function () {
+        var s = pstate(cur, idx);
+        s.s = Math.max(0.4, +((s.s || 1) * 0.92).toFixed(3));
+        savePos(); applyPositions(cur); renderFields();
+      });
+      var bPlus = document.createElement("button");
+      bPlus.textContent = "A＋";
+      bPlus.title = "字号放大";
+      bPlus.addEventListener("click", function () {
+        var s = pstate(cur, idx);
+        s.s = Math.min(2.5, +((s.s || 1) * 1.08).toFixed(3));
+        savePos(); applyPositions(cur); renderFields();
+      });
+      [bHide, bReset, bMinus, bPlus].forEach(function (b) { fb.appendChild(b); });
+      fh.appendChild(lab);
+      fh.appendChild(fb);
       var long = t.textContent.length > 26;
       var inp = document.createElement(long ? "textarea" : "input");
       if (!long) inp.type = "text";
@@ -488,12 +552,20 @@
         t.textContent = inp.value;
         persist();
       });
-      d.appendChild(lab);
+      d.appendChild(fh);
       d.appendChild(inp);
       box.appendChild(d);
     });
+    var stc = POS.cards[cur] || {};
+    var moved = 0, hid = 0;
+    Object.keys(stc).forEach(function (k) {
+      if (stc[k].dx || stc[k].dy || (stc[k].s && stc[k].s !== 1)) moved++;
+      if (stc[k].hidden) hid++;
+    });
     document.getElementById("curName").textContent = "当前：" + nameOf(card)
       + " ｜ " + textsOf(card).length + " 处可改文字";
+    document.getElementById("poscount").innerHTML =
+      (moved ? "<b>" + moved + "</b> 处移动/缩放 " : "") + (hid ? "<b>" + hid + "</b> 处隐藏" : "");
   }
 
   function fit() {
@@ -785,8 +857,10 @@
 
   document.getElementById("btnResetCard").addEventListener("click", function () {
     textsOf(cards[cur]).forEach(function (t, k) { t.textContent = ORIG[cur][k]; });
+    delete POS.cards[cur];
+    savePos(); applyPositions(cur);
     persist(); renderFields();
-    toast("已还原 " + nameOf(cards[cur]));
+    toast("已还原 " + nameOf(cards[cur]) + "（含位置）");
   });
 
   document.getElementById("btnResetAll").addEventListener("click", function () {
@@ -794,8 +868,11 @@
       textsOf(c).forEach(function (t, k) { t.textContent = ORIG[i][k]; });
     });
     try { localStorage.removeItem(KEY); } catch (e) {}
+    POS.cards = {};
+    try { localStorage.removeItem(KEYPOS); } catch (e) {}
+    applyAllPositions();
     renderFields();
-    toast("已清除所有修改");
+    toast("已清除所有修改（文字 + 位置）");
   });
 
   document.addEventListener("keydown", function (e) {
@@ -804,6 +881,95 @@
       exportOne(cur);
     }
   });
+
+  /* ---------- 拖动 / 隐藏 / 字号（版式微调） ---------- */
+  var KEYPOS = "rockday-pos-v2";
+  var POS = (function () {
+    try { return JSON.parse(localStorage.getItem(KEYPOS) || '{"cards":{}}'); }
+    catch (e) { return { cards: {} }; }
+  })();
+  if (!POS || !POS.cards) POS = { cards: {} };
+  function savePos() {
+    try { localStorage.setItem(KEYPOS, JSON.stringify(POS)); } catch (e) {}
+  }
+  function pstate(ci, ti) {
+    var c = POS.cards[ci] || (POS.cards[ci] = {});
+    return c[ti] || (c[ti] = {});
+  }
+  function applyPositions(ci) {
+    var card = cards[ci];
+    if (!card) return;
+    textsOf(card).forEach(function (t, k) {
+      var s = pstate(ci, k);
+      if (!t.dataset.fs) t.dataset.fs = t.getAttribute("font-size") || "24";
+      var sc = s.s || 1;
+      t.setAttribute("font-size", (parseFloat(t.dataset.fs) * sc).toFixed(2) + "px");
+      t.setAttribute("transform", "translate(" + (s.dx || 0) + "," + (s.dy || 0) + ")");
+      t.style.display = s.hidden ? "none" : "";
+    });
+  }
+  function applyAllPositions() { cards.forEach(function (c, i) { applyPositions(i); }); }
+
+  var drag = null;
+  wrap.addEventListener("pointerdown", function (e) {
+    var t = e.target;
+    if (!(t && t.closest)) return;
+    var el = t.closest("text[data-i]");
+    if (!el) return;
+    var card = el.closest(".card");
+    var ci = cards.indexOf(card), ti = textsOf(card).indexOf(el);
+    if (ci < 0 || ti < 0) return;
+    var svg = card.querySelector("svg");
+    var box = svg.getBoundingClientRect();
+    if (!box.width) return;
+    var s = pstate(ci, ti);
+    drag = {
+      el: el, ci: ci, ti: ti, k: box.width / 1080,
+      sx: e.clientX, sy: e.clientY, dx: s.dx || 0, dy: s.dy || 0
+    };
+    el.style.cursor = "grabbing";
+    e.preventDefault();
+  });
+  window.addEventListener("pointermove", function (e) {
+    if (!drag) return;
+    var s = pstate(drag.ci, drag.ti);
+    s.dx = Math.round(drag.dx + (e.clientX - drag.sx) / drag.k);
+    s.dy = Math.round(drag.dy + (e.clientY - drag.sy) / drag.k);
+    drag.el.setAttribute("transform", "translate(" + s.dx + "," + s.dy + ")");
+  });
+  window.addEventListener("pointerup", function () {
+    if (!drag) return;
+    drag.el.style.cursor = "move";
+    drag = null;
+    savePos(); renderFields();
+  });
+  wrap.addEventListener("pointercancel", function () { drag = null; });
+
+  wrap.addEventListener("dblclick", function (e) {
+    var el = e.target.closest ? e.target.closest("text[data-i]") : null;
+    if (!el) return;
+    var card = el.closest(".card");
+    var ci = cards.indexOf(card), ti = textsOf(card).indexOf(el);
+    if (ci < 0 || ti < 0) return;
+    show(ci);
+    var inp = document.querySelectorAll("#fields .field input, #fields .field textarea")[ti];
+    if (inp) {
+      inp.scrollIntoView({ block: "center" });
+      inp.focus(); inp.select();
+    }
+    toast("第 " + (ci + 1) + " 张 · 文字 #" + (ti + 1));
+  });
+
+  document.getElementById("btnUnhide").addEventListener("click", function () {
+    var c = POS.cards[cur] || {};
+    var n = 0;
+    Object.keys(c).forEach(function (k) { if (c[k].hidden) { c[k].hidden = false; n++; } });
+    savePos(); applyPositions(cur); renderFields();
+    toast(n ? "已显示 " + n + " 处文字" : "这张卡没有隐藏的文字");
+  });
+
+  window.__posState = function () { return POS; };
+  window.__applyPositions = applyAllPositions;
 
   /* ---------- 分享 / 协作（链接带修改，不需要服务器） ---------- */
   function b64e(s) {
@@ -822,6 +988,7 @@
       });
     });
     d.b = { mode: bgState.mode, idx: bgState.idx, veil: bgState.veil, blur: bgState.blur };
+    d.p = JSON.parse(JSON.stringify(POS.cards || {}));
     return d;
   }
   function applySnapshot(d) {
@@ -837,6 +1004,11 @@
     if (d.b) {
       var mode = d.b.mode === "photo" ? "orig" : (d.b.mode || "orig");
       applyBg({ mode: mode, idx: d.b.idx || 0, photo: "", veil: d.b.veil || 0, blur: d.b.blur || 0 }, true);
+    }
+    if (d.p) {
+      POS.cards = d.p;
+      savePos();
+      applyAllPositions();
     }
     persist();
     return true;
@@ -900,6 +1072,9 @@
       textsOf(c).forEach(function (t, k) { t.textContent = ORIG[i][k]; });
     });
     try { localStorage.removeItem(KEY); } catch (e) {}
+    POS.cards = {};
+    try { localStorage.removeItem(KEYPOS); } catch (e) {}
+    applyAllPositions();
     applyBg({ mode: "orig", idx: 0, photo: "", veil: 0, blur: 0 }, true);
     renderFields(); show(0);
     toast("已回到原始版");
@@ -923,6 +1098,7 @@
     applySnapshot(shared);
     document.getElementById("sharestat").textContent = "来自分享链接";
   }
+  applyAllPositions();
   buildTabs();
   show(0);
   fit();
